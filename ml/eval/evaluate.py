@@ -88,16 +88,22 @@ def run_evaluation(settings: Settings) -> EvaluationReport:
     return report
 
 
-def _build_gallery(split, embedder) -> Gallery:
+def _build_gallery(split, embedder, progress_callback=None) -> Gallery:
     """
     Enroll every known individual from its gallery-split images.
 
     One prototype per individual, built from the reference images reserved by the
-    split — this is the set queries are matched against.
+    split — this is the set queries are matched against. ``progress_callback(done,
+    total)`` is invoked per individual for callers streaming progress (e.g. the
+    seed job); it may raise to abort cooperatively (job cancellation).
     """
     gallery = Gallery()
-    for identity, rows in split.gallery.groupby(COL_IDENTITY):
+    groups = list(split.gallery.groupby(COL_IDENTITY))
+    total = len(groups)
+    for done, (identity, rows) in enumerate(groups, start=1):
         gallery.enroll(individual_id=str(identity), image_paths=rows["path"].tolist(), embedder=embedder)
+        if progress_callback is not None:
+            progress_callback(done, total)
     return gallery
 
 

@@ -16,7 +16,7 @@ encoder, and the geometry needed to rebuild the head — everything inference ne
 and nothing it does not (the ArcFace weights are intentionally excluded).
 """
 
-from typing import Tuple
+from typing import Callable, Optional, Tuple
 
 import torch
 from torch.utils.data import DataLoader, random_split
@@ -35,7 +35,10 @@ from ml.utils.seed import seed_everything
 logger = get_logger(__name__)
 
 
-def run_training(settings: Settings) -> None:
+def run_training(
+    settings: Settings,
+    progress_callback: Optional[Callable[[int, int, float, float], None]] = None,
+) -> None:
     """
     Train the MIL head end to end and persist the inference checkpoint.
 
@@ -78,6 +81,12 @@ def run_training(settings: Settings) -> None:
         )
         val_acc = _validate(embedder=embedder, arcface=arcface, loader=val_loader)
         logger.info(f"Epoch {epoch:3d}/{settings.epochs} | train_loss={train_loss:.4f} | val_acc={val_acc:.4f}")
+
+        # Stream per-epoch progress to callers (e.g. a background job). The callback
+        # may raise to abort cooperatively (job cancellation) — checked here, between
+        # epochs, so a cancelled run stops at a clean boundary.
+        if progress_callback is not None:
+            progress_callback(epoch, settings.epochs, train_loss, val_acc)
 
         # Keep the checkpoint from the best-validating epoch rather than the last,
         # so a late-epoch overfit does not overwrite a better model.

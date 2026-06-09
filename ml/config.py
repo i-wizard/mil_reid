@@ -20,22 +20,6 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class DatasetName(str, Enum):
-    """
-    Selectable datasets exposed through the WildlifeDatasets toolkit.
-
-    We default to a small, strongly patterned species so the demo trains in
-    reasonable time on CPU while still giving the patch-attention mechanism
-    distinctive local features (scales, fur patterns) to latch onto. The value
-    of each member is the exact class name in ``wildlife_datasets.datasets`` so
-    the loader can resolve it by attribute lookup.
-    """
-
-    SEA_TURTLE_ID_HEADS = "SeaTurtleIDHeads"
-    IPANDA50 = "IPanda50"
-    MACAQUE_FACES = "MacaqueFaces"
-
-
 class BackboneName(str, Enum):
     """
     Frozen feature-extractor backbones.
@@ -110,8 +94,22 @@ class Settings(BaseSettings):
         description="Where trained head weights, the gallery index, and reports live.",
     )
 
+    # --- Model identity (multi-model support) ---
+    # Each trained model lives in its own namespace so several species/domains can
+    # coexist: training writes to artifacts/models/<model_name>/, and the API
+    # selects which model to enroll/identify against. Defaults to "default" so the
+    # single-model workflow is unchanged.
+    model_name: str = Field(
+        default="default",
+        description="Logical name of the model being trained/served; namespaces its checkpoint + gallery.",
+    )
+
     # --- Dataset / backbone selection ---
-    dataset: DatasetName = DatasetName.SEA_TURTLE_ID_HEADS
+    # `dataset` is the WildlifeDatasets class name (e.g. "SeaTurtleIDHeads"). It is a
+    # free string (not an enum) so the Settings view can train on any curated
+    # dataset; validity is checked at the API boundary against CURATED_DATASETS,
+    # keeping this field — and every Settings() construction — free of any SDK import.
+    dataset: str = Field(default="SeaTurtleIDHeads", description="WildlifeDatasets class name to load.")
     backbone: BackboneName = BackboneName.MEGADESCRIPTOR_T
     pooling: PoolingType = PoolingType.GATED_ATTENTION
 
@@ -189,14 +187,37 @@ class Settings(BaseSettings):
         return self.effective_image_size // self.patch_grid
 
     @property
+    def models_root(self) -> Path:
+        """Directory holding every model's namespaced subdirectory."""
+        return self.artifacts_root / "models"
+
+    def model_dir(self, name: str) -> Path:
+        """Per-model directory (checkpoint + gallery) for ``name``."""
+        return self.models_root / name
+
+    def head_weights_path_for(self, name: str) -> Path:
+        """Trained head checkpoint path for a named model."""
+        return self.model_dir(name) / "mil_head.pt"
+
+    def gallery_path_for(self, name: str) -> Path:
+        """Persisted gallery path for a named model."""
+        return self.model_dir(name) / "gallery.npz"
+
+    @property
     def head_weights_path(self) -> Path:
-        """Canonical location of the trained MIL+projection head checkpoint."""
-        return self.artifacts_root / "mil_head.pt"
+        """
+        Trained head checkpoint for the *active* model (``model_name``).
+
+        Resolves through the per-model layout so the single-model training/inference
+        code paths keep working unchanged — they just write/read under
+        ``artifacts/models/<model_name>/`` now.
+        """
+        return self.head_weights_path_for(self.model_name)
 
     @property
     def gallery_path(self) -> Path:
-        """Canonical location of the persisted gallery index."""
-        return self.artifacts_root / "gallery.npz"
+        """Persisted gallery for the active model (``model_name``)."""
+        return self.gallery_path_for(self.model_name)
 
 
 def get_settings(overrides: Optional[dict] = None) -> Settings:

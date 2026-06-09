@@ -33,6 +33,24 @@ body {
 .app-header h1 { margin: 0; font-size: 1.6rem; }
 .subtitle { margin: 0.25rem 0 0.75rem; color: var(--muted); font-size: 0.9rem; }
 
+/* --- Model picker --- */
+.model-picker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin: 0 auto 0.75rem;
+}
+.model-picker label { color: var(--muted); font-size: 0.9rem; }
+.model-picker select {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+  padding: 0.4rem 0.6rem;
+  font-size: 0.95rem;
+}
+
 /* --- Status banner --- */
 .banner {
   max-width: 720px;
@@ -152,6 +170,37 @@ main { max-width: 720px; margin: 0 auto; padding: 1.25rem 1.5rem 4rem; }
   background: var(--surface); border-radius: var(--radius); padding: 0.5rem 0.75rem;
 }
 .gallery-list .empty { justify-content: center; color: var(--muted); }
+
+/* --- Background job indicator (header chip) --- */
+.job-indicator {
+  max-width: 720px;
+  margin: 0.75rem auto 0;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.75rem;
+}
+.job-indicator[hidden] { display: none; }
+#job-indicator-text { flex: 0 0 auto; font-size: 0.9rem; color: var(--text); }
+.job-bar { flex: 1 1 auto; height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
+.job-bar__fill { display: block; height: 100%; width: 0%; background: var(--accent); transition: width 0.3s; }
+
+/* --- Settings: dataset list + form actions --- */
+.settings-list { list-style: none; padding: 0; margin: 0.5rem 0 1.5rem; display: flex; flex-direction: column; gap: 0.4rem; }
+.settings-list li {
+  display: flex; align-items: center; gap: 0.75rem;
+  background: var(--surface); border-radius: var(--radius); padding: 0.5rem 0.75rem;
+}
+.settings-list li > span:first-child { flex: 1 1 auto; }
+.settings-actions { display: flex; gap: 0.4rem; }
+.badge { font-size: 0.75rem; padding: 0.15rem 0.5rem; border-radius: 999px; }
+.badge--ok { background: rgba(46, 204, 113, 0.15); color: var(--good); border: 1px solid var(--good); }
+.badge--muted { background: var(--surface-2); color: var(--muted); }
+.form-actions { display: flex; gap: 0.5rem; }
+.panel h3 { margin: 1.25rem 0 0.25rem; }
 
 /* --- Toast --- */
 .toast {

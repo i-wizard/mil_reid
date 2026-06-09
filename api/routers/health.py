@@ -1,9 +1,9 @@
 """
-Health/readiness endpoint.
+Health endpoint — global liveness, not model-specific.
 
-Separate from the inference routes because a client (or a Docker healthcheck)
-needs to know whether the model is loaded *before* sending work — the rest of the
-API 503s until then, and this is how you find out without triggering that error.
+A client or Docker healthcheck uses this to confirm the app is up and whether
+*any* model is trained. Per-model readiness (which the UI banner needs) comes
+from /models, since the app now serves several models.
 """
 
 from fastapi import APIRouter, Depends
@@ -18,19 +18,18 @@ router = APIRouter(tags=["health"])
 @router.get(
     "/health",
     response_model=HealthResponse,
-    response_description="Service liveness and model readiness.",
+    response_description="Global service liveness and how many models are trained.",
 )
 def health(service: ReidService = Depends(get_service)) -> HealthResponse:
     """
-    Report whether the API is up and whether a trained model is loaded.
+    Report that the API is up and how many trained models were discovered.
 
-    ``model_ready=false`` means the head checkpoint was absent at startup; train
-    it and restart, after which enrollment and identification become available.
+    ``models_available == 0`` means nothing has been trained yet — train a model
+    (scripts.train) and it appears here and in /models without an API restart.
     """
+    names = service.registry.names()
     return HealthResponse(
         status="ok",
-        model_ready=service.is_ready(),
-        backbone=service.settings.backbone.value,
-        dataset=service.settings.dataset.value,
-        num_individuals=len(service.list_individuals()),
+        models_available=len(names),
+        default_model=service.default_model() if names else None,
     )

@@ -29,6 +29,11 @@ def get_service(request: Request) -> ReidService:
     return request.app.state.service
 
 
+def get_jobs(request: Request):
+    """Return the singleton ``JobManager`` created during app startup (background jobs)."""
+    return request.app.state.jobs
+
+
 # Re-exported as the canonical injection points so routers import one name each.
 ServiceDep = Depends(get_service)
 SettingsDep = Depends(get_settings)

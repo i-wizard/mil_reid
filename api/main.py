@@ -17,8 +17,9 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from api.config import ApiSettings
-from api.routers import enroll, gallery, health, identify
-from api.service import ModelNotReadyError, ReidService
+from api.jobs import JobBusyError, JobManager, JobNotFoundError
+from api.routers import datasets, enroll, gallery, health, identify, jobs, models, training
+from api.service import ModelNotFoundError, ModelNotReadyError, ReidService
 from ml.config import get_settings as get_model_settings
 from ml.utils.logging import get_logger
 
@@ -30,20 +31,18 @@ async def lifespan(app: FastAPI):
     """
     Build shared state at startup and expose it on ``app.state``.
 
-    The model settings and the (load-once) ReidService are created here rather
-    than per-request because constructing the frozen backbone is expensive. The
-    service tolerates a missing trained head, coming up not-ready so the server
-    still starts — readiness is then reported via /health.
+    The ReidService is created here once (its model registry scan is cheap; the
+    heavy per-model backbone load happens lazily on first request). The server
+    starts even with zero trained models — readiness is reported per-model via
+    /models.
     """
     api_settings = ApiSettings()
     model_settings = get_model_settings()
 
     app.state.api_settings = api_settings
     app.state.service = ReidService.build(settings=model_settings)
-    logger.info(
-        f"API ready (model_ready={app.state.service.is_ready()}, "
-        f"enrolled={len(app.state.service.list_individuals())})."
-    )
+    app.state.jobs = JobManager()
+    logger.info(f"API ready. Models discovered: {app.state.service.registry.names() or '(none)'}.")
     yield
     # Nothing to tear down: torch holds no external handles and the gallery is
     # persisted on every mutation, so there is no shutdown work to do.
@@ -56,8 +55,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS is configured from settings at import time using defaults; the demo allows
-# all origins so the Part 3 browser client can call the API without extra setup.
 _cors = ApiSettings()
 app.add_middleware(
     CORSMiddleware,
@@ -78,6 +75,25 @@ async def _model_not_ready_handler(request: Request, exc: ModelNotReadyError) ->
     return JSONResponse(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content={"detail": str(exc)})
 
 
+@app.exception_handler(ModelNotFoundError)
+async def _model_not_found_handler(request: Request, exc: ModelNotFoundError) -> JSONResponse:
+    """Map a request for an unknown model name to 404 Not Found (distinct from 503 load failures)."""
+    # KeyError's str() wraps the message in quotes; strip them for a clean detail.
+    return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content={"detail": str(exc).strip("'\"")})
+
+
+@app.exception_handler(JobBusyError)
+async def _job_busy_handler(request: Request, exc: JobBusyError) -> JSONResponse:
+    """Map a start-while-busy to 409 Conflict — single-flight rejection, not a queue."""
+    return JSONResponse(status_code=status.HTTP_409_CONFLICT, content={"detail": str(exc)})
+
+
+@app.exception_handler(JobNotFoundError)
+async def _job_not_found_handler(request: Request, exc: JobNotFoundError) -> JSONResponse:
+    """Map an unknown job id to 404 Not Found."""
+    return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content={"detail": str(exc).strip("'\"")})
+
+
 @app.exception_handler(ValueError)
 async def _value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
     """Map service-layer validation errors (e.g. empty individual_id) to 400 Bad Request."""
@@ -85,11 +101,15 @@ async def _value_error_handler(request: Request, exc: ValueError) -> JSONRespons
 
 
 app.include_router(health.router)
+app.include_router(models.router)
+app.include_router(datasets.router)
+app.include_router(training.router)
+app.include_router(jobs.router)
 app.include_router(enroll.router)
 app.include_router(identify.router)
 app.include_router(gallery.router)
 
-# Serve the Part 3 browser client from the same origin. Mounted LAST and at "/"
+# Serve the browser client from the same origin. Mounted LAST and at "/"
 # so the greedy static mount only handles paths the API routers (and /docs) did
 # not claim — same origin means the UI's fetch() calls need no CORS. Guarded so
 # the API still imports/runs in environments without the web/ dir (e.g. tests).

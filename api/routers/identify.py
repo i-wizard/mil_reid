@@ -45,23 +45,26 @@ router = APIRouter(tags=["identify"])
 def identify(
     file: UploadFile = File(..., description="Query image to identify."),
     bbox: Optional[str] = Form(default=None, description="Optional 'x,y,w,h' crop; omit to use the whole image."),
+    model: Optional[str] = Form(default=None, description="Model to identify against; omit for the default model."),
     service: ReidService = Depends(get_service),
     settings: ApiSettings = Depends(get_settings),
 ) -> IdentifyResponse:
     """
-    Identify the individual in the uploaded image against the current gallery.
+    Identify the individual in the uploaded image against the selected model's gallery.
 
     Returns the top-k matches (best first) and ``is_unknown=true`` when the best
     score is below the configured threshold. The attention grid is included so a
-    client can visualise it; use /explain for a rendered overlay. 503 if no model.
+    client can visualise it; use /explain for a rendered overlay. 404 for an
+    unknown model, 503 if it can't load.
     """
     parsed_bbox = _parse_bbox(bbox)
     with saved_uploads(uploads=[file], max_bytes=settings.max_upload_bytes) as paths:
-        result = service.identify(image_path=paths[0], bbox=parsed_bbox)
+        result = service.identify(model=model, image_path=paths[0], bbox=parsed_bbox)
 
     grid = result.embed_result.grid
     attention_grid = result.embed_result.attention.reshape(grid, grid).tolist()
     return IdentifyResponse(
+        model=model or service.default_model(),
         is_unknown=result.is_unknown,
         candidates=[CandidateResponse(individual_id=c.individual_id, score=c.score) for c in result.candidates],
         grid=grid,
@@ -78,18 +81,19 @@ def identify(
 def explain(
     file: UploadFile = File(..., description="Query image to visualise attention for."),
     bbox: Optional[str] = Form(default=None, description="Optional 'x,y,w,h' crop; omit to use the whole image."),
+    model: Optional[str] = Form(default=None, description="Model whose attention to render; omit for the default."),
     service: ReidService = Depends(get_service),
     settings: ApiSettings = Depends(get_settings),
 ) -> Response:
     """
-    Render the attention heatmap overlay for the uploaded image as a PNG.
+    Render the selected model's attention heatmap overlay for the image as a PNG.
 
     This is the explainability visual — it shows which patches the model weighted
     when forming the identity embedding. Binary output, so it returns a raw
-    ``Response`` (the documented exception to the JSON response_model rule). 503 if
-    no model is loaded.
+    ``Response`` (the documented exception to the JSON response_model rule). 404 for
+    an unknown model, 503 if it can't load.
     """
     parsed_bbox = _parse_bbox(bbox)
     with saved_uploads(uploads=[file], max_bytes=settings.max_upload_bytes) as paths:
-        png_bytes = service.attention_png(image_path=paths[0], bbox=parsed_bbox)
+        png_bytes = service.attention_png(model=model, image_path=paths[0], bbox=parsed_bbox)
     return Response(content=png_bytes, media_type="image/png")

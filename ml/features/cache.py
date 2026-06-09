@@ -13,7 +13,7 @@ Cache layout: one ``.npy`` file per image under ``cache_root``, holding a
 """
 
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
 import pandas as pd
@@ -37,6 +37,7 @@ def precompute_features(
     df: pd.DataFrame,
     settings: Settings,
     backbone: Optional[FrozenBackbone] = None,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> int:
     """
     Embed every image in ``df`` and write its patch embeddings to the cache.
@@ -46,7 +47,10 @@ def precompute_features(
     Returns the number of newly written files for progress reporting.
 
     The dataframe is the unit of work (not the whole dataset) so callers can
-    precompute only the splits they need.
+    precompute only the splits they need. ``progress_callback(done, total)`` is
+    invoked periodically (throttled) for callers — e.g. a background job — that
+    want to stream progress; it may raise to abort cooperatively (used for job
+    cancellation), which simply unwinds this loop.
     """
     settings.cache_root.mkdir(parents=True, exist_ok=True)
     if backbone is None:
@@ -57,14 +61,17 @@ def precompute_features(
     for position, (_, row) in enumerate(df.iterrows(), start=1):
         image_id = str(row[COL_IMAGE_ID])
         out_path = _cache_file(cache_root=settings.cache_root, image_id=image_id)
-        if out_path.exists():
-            continue
+        if not out_path.exists():
+            bag = make_bag_from_path(path=row[COL_PATH], bbox=row[COL_BBOX], settings=settings)
+            embeddings = backbone.embed_patches(bag.patches).cpu().numpy().astype(np.float32)
+            np.save(out_path, embeddings)
+            written += 1
 
-        bag = make_bag_from_path(path=row[COL_PATH], bbox=row[COL_BBOX], settings=settings)
-        embeddings = backbone.embed_patches(bag.patches).cpu().numpy().astype(np.float32)
-        np.save(out_path, embeddings)
-        written += 1
-
+        # Report/throttle on every Nth image and the last one. Placed outside the
+        # skip-check so progress (and cancellation) advance even when most files
+        # are already cached.
+        if progress_callback is not None and (position % 25 == 0 or position == total):
+            progress_callback(position, total)
         if position % 200 == 0 or position == total:
             logger.info(f"Feature cache: processed {position}/{total} images ({written} new).")
 

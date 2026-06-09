@@ -18,14 +18,26 @@
     <header class="app-header">
       <h1>🐾 Animal Re-Identification</h1>
       <p class="subtitle">Patch-bag Multiple Instance Learning · open-set retrieval</p>
-      <!-- Readiness banner; text/colour set from /health on load -->
+      <!-- Model picker: populated from /models; selection scopes every action. -->
+      <div class="model-picker">
+        <label for="model-select">Model</label>
+        <select id="model-select"></select>
+      </div>
+      <!-- Readiness banner; text/colour set from the selected model on load -->
       <div id="status-banner" class="banner banner--pending" role="status">Checking model status…</div>
+      <!-- Background-job indicator: shown only while a job runs; offers Cancel. -->
+      <div id="job-indicator" class="job-indicator" hidden role="status">
+        <span id="job-indicator-text">Job running…</span>
+        <span class="job-bar"><span id="job-bar-fill" class="job-bar__fill"></span></span>
+        <button id="job-cancel-btn" class="btn btn--danger">Cancel</button>
+      </div>
     </header>
 
     <nav class="tabs" role="tablist">
       <button class="tab is-active" data-tab="identify" role="tab">Identify</button>
       <button class="tab" data-tab="enroll" role="tab">Enroll</button>
       <button class="tab" data-tab="gallery" role="tab">Gallery</button>
+      <button class="tab" data-tab="settings" role="tab">Settings</button>
     </nav>
 
     <main>
@@ -39,7 +51,10 @@
             <input type="file" id="identify-file" accept="image/*" required />
             <span>Choose a query image…</span>
           </label>
-          <button type="submit" class="btn btn--primary" data-action="identify">Identify</button>
+          <div class="form-actions">
+            <button type="submit" class="btn btn--primary" data-action="identify">Identify</button>
+            <button type="button" class="btn" id="identify-reset">Reset</button>
+          </div>
         </form>
 
         <div class="results results--identify">
@@ -68,7 +83,10 @@
             <span>Choose reference image(s)…</span>
           </label>
           <div id="enroll-thumbs" class="thumbs"></div>
-          <button type="submit" class="btn btn--primary" data-action="enroll">Enroll</button>
+          <div class="form-actions">
+            <button type="submit" class="btn btn--primary" data-action="enroll">Enroll</button>
+            <button type="button" class="btn" id="enroll-reset">Reset</button>
+          </div>
         </form>
       </section>
 
@@ -78,11 +96,29 @@
         <p class="hint">Individuals currently enrolled. Seed from the trained dataset to try identification quickly.</p>
 
         <div class="gallery-actions">
-          <button class="btn" data-action="seed" id="seed-btn">Seed from dataset</button>
+          <button class="btn js-job-btn" data-action="seed" id="seed-btn">Seed from dataset</button>
           <button class="btn btn--danger" data-action="reset" id="reset-btn">Reset gallery</button>
           <button class="btn" data-action="refresh" id="refresh-btn">Refresh</button>
         </div>
         <ul id="gallery-list" class="gallery-list"></ul>
+      </section>
+
+      <!-- ============================ SETTINGS =========================== -->
+      <section id="panel-settings" class="panel" role="tabpanel">
+        <h2>Settings</h2>
+        <p class="hint">Manage datasets and train models. These run in the background — only one at a time.</p>
+
+        <h3>Datasets</h3>
+        <p class="hint">Download a curated dataset, then precompute its features so it can be trained on.</p>
+        <ul id="dataset-list" class="settings-list"></ul>
+
+        <h3>Train a model</h3>
+        <p class="hint">Train a new model on a downloaded dataset; it appears in the model picker when done.</p>
+        <form id="train-form" class="form">
+          <input type="text" id="train-model-name" class="text-input" placeholder="New model name (e.g. turtles)" required />
+          <select id="train-dataset" class="text-input"></select>
+          <button type="submit" class="btn btn--primary js-job-btn" id="train-submit" data-action="train">Train</button>
+        </form>
       </section>
     </main>
 

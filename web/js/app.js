@@ -13,6 +13,8 @@
 
   const $ = (sel) => document.querySelector(sel);
   let modelReady = false;
+  let selectedModel = null; // the model every action targets (null until /models loads)
+  let modelsById = {}; // name -> ModelInfo, for banner/readiness lookups
 
   // --- Toast -------------------------------------------------------------
   let toastTimer = null;
@@ -47,6 +49,87 @@
     }
   }
 
+  // --- Background jobs (single-flight) + SSE -----------------------------
+  let jobRunning = false;
+  let currentJobId = null;
+
+  /** Enable/disable all job-start buttons; the running job's own Cancel stays active. */
+  function applyJobGating() {
+    document.querySelectorAll(".js-job-btn").forEach((b) => (b.disabled = jobRunning));
+  }
+
+  function beginJobUI(jobId, label) {
+    jobRunning = true;
+    currentJobId = jobId;
+    $("#job-indicator").hidden = false;
+    $("#job-indicator-text").textContent = label + "…";
+    $("#job-bar-fill").style.width = "0%";
+    applyJobGating();
+  }
+
+  function updateJobUI(event) {
+    if (event.message) $("#job-indicator-text").textContent = event.message;
+    if (typeof event.progress === "number") $("#job-bar-fill").style.width = `${Math.round(event.progress * 100)}%`;
+  }
+
+  function endJobUI() {
+    jobRunning = false;
+    currentJobId = null;
+    $("#job-indicator").hidden = true;
+    applyJobGating();
+  }
+
+  /**
+   * Start a background job and drive the UI from its SSE stream.
+   * `startFn` returns the 202 body ({job_id}); a 409 (busy) surfaces as a toast.
+   * `onSuccess` runs on the terminal success event (to refresh the affected view).
+   */
+  async function runJob(label, startFn, onSuccess) {
+    let started;
+    try {
+      started = await startFn();
+    } catch (err) {
+      toast(err.message || "Could not start job", "error"); // includes 409 "a job is running"
+      return;
+    }
+    beginJobUI(started.job_id, label);
+    Api.subscribeJob(started.job_id, (event) => {
+      updateJobUI(event);
+      if (event.status === "succeeded") {
+        endJobUI();
+        toast(`${label} complete`);
+        if (onSuccess) onSuccess(event);
+      } else if (event.status === "failed") {
+        endJobUI();
+        toast(`${label} failed: ${event.error || "unknown error"}`, "error");
+      } else if (event.status === "cancelled") {
+        endJobUI();
+        toast(`${label} cancelled`);
+      }
+    });
+  }
+
+  function initJobIndicator() {
+    $("#job-cancel-btn").addEventListener("click", () => {
+      if (currentJobId) Api.cancelJob(currentJobId).catch((err) => toast(err.message, "error"));
+    });
+  }
+
+  /** On load, re-attach to a job already running (e.g. after a page refresh). */
+  async function resumeActiveJob() {
+    const job = await Api.activeJob().catch(() => null);
+    if (!job) return;
+    beginJobUI(job.id, job.kind);
+    Api.subscribeJob(job.id, (event) => {
+      updateJobUI(event);
+      if (["succeeded", "failed", "cancelled"].includes(event.status)) {
+        endJobUI();
+        refreshModels();
+        refreshDatasets();
+      }
+    });
+  }
+
   // --- Tabs --------------------------------------------------------------
   function initTabs() {
     document.querySelectorAll(".tab").forEach((tab) => {
@@ -56,31 +139,89 @@
         tab.classList.add("is-active");
         $(`#panel-${tab.dataset.tab}`).classList.add("is-active");
         if (tab.dataset.tab === "gallery") refreshGallery();
+        if (tab.dataset.tab === "settings") refreshDatasets();
       });
     });
   }
 
-  // --- Status banner -----------------------------------------------------
-  async function refreshStatus() {
+  // --- Model picker + status banner --------------------------------------
+  function setBanner(kind, text) {
     const banner = $("#status-banner");
-    try {
-      const h = await Api.health();
-      modelReady = h.model_ready;
-      if (h.model_ready) {
-        banner.className = "banner banner--ready";
-        banner.textContent = `Model ready · ${h.dataset} · ${h.num_individuals} enrolled`;
-      } else {
-        banner.className = "banner banner--notready";
-        banner.textContent = "No trained model — run training (scripts.train), then restart the API.";
-      }
-    } catch (err) {
-      banner.className = "banner banner--notready";
-      banner.textContent = `API unreachable: ${err.message}`;
-      modelReady = false;
-    }
-    // Gate the model-dependent actions on readiness.
+    banner.className = `banner banner--${kind}`;
+    banner.textContent = text;
+  }
+
+  /** Enable/disable model-dependent actions based on the selected model's readiness. */
+  function gateActions() {
     document.querySelectorAll('[data-action="identify"], [data-action="enroll"], #seed-btn').forEach((b) => {
       b.disabled = !modelReady;
+    });
+  }
+
+  /**
+   * Fetch /models, (re)populate the picker, and reflect the selection's readiness.
+   * Called on load and after any gallery change so counts/readiness stay current.
+   */
+  async function refreshModels() {
+    const select = $("#model-select");
+    let data;
+    try {
+      data = await Api.listModels();
+    } catch (err) {
+      setBanner("notready", `API unreachable: ${err.message}`);
+      modelReady = false;
+      gateActions();
+      return;
+    }
+
+    modelsById = {};
+    data.models.forEach((m) => (modelsById[m.name] = m));
+    const names = data.models.map((m) => m.name);
+
+    // Keep the current selection if it still exists; else fall back to the default.
+    if (!selectedModel || !names.includes(selectedModel)) {
+      selectedModel = data.default_model || names[0] || null;
+    }
+
+    select.innerHTML = "";
+    if (names.length === 0) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "(no models trained)";
+      select.appendChild(opt);
+      select.disabled = true;
+    } else {
+      select.disabled = false;
+      data.models.forEach((m) => {
+        const opt = document.createElement("option");
+        opt.value = m.name;
+        opt.textContent = m.ready ? m.name : `${m.name} (not ready)`;
+        if (m.name === selectedModel) opt.selected = true;
+        select.appendChild(opt);
+      });
+    }
+    applySelectedModel();
+  }
+
+  /** Update the banner + action gating for whichever model is currently selected. */
+  function applySelectedModel() {
+    const m = selectedModel ? modelsById[selectedModel] : null;
+    modelReady = !!(m && m.ready);
+    if (!m) {
+      setBanner("notready", "No trained model — run training (scripts.train); it appears here automatically.");
+    } else if (m.ready) {
+      setBanner("ready", `Model '${m.name}' ready · ${m.dataset || "?"} · ${m.num_individuals} enrolled`);
+    } else {
+      setBanner("notready", `Model '${m.name}' is not ready.`);
+    }
+    gateActions();
+  }
+
+  function initModelPicker() {
+    $("#model-select").addEventListener("change", (e) => {
+      selectedModel = e.target.value || null;
+      applySelectedModel();
+      refreshGallery();
     });
   }
 
@@ -108,8 +249,8 @@
         // Identification and heatmap run together so the result and the "why"
         // appear at once; both are independent calls on the same image.
         const [result, heatmapUrl] = await Promise.all([
-          Api.identify(file),
-          Api.explainObjectUrl(file).catch(() => null), // heatmap is best-effort
+          Api.identify(file, selectedModel),
+          Api.explainObjectUrl(file, selectedModel).catch(() => null), // heatmap is best-effort
         ]);
         if (!result) return;
         renderIdentify(result, heatmapUrl);
@@ -172,12 +313,12 @@
       const button = form.querySelector('[data-action="enroll"]');
 
       withBusy(button, async () => {
-        const res = await Api.enroll(id, files);
+        const res = await Api.enroll(id, files, selectedModel);
         if (!res) return;
-        toast(`Enrolled '${res.individual_id}' (${res.images_enrolled} image(s)); ${res.total_individuals} total`);
+        toast(`Enrolled '${res.individual_id}' into '${res.model}' (${res.images_enrolled} image(s)); ${res.total_individuals} total`);
         form.reset();
         thumbs.innerHTML = "";
-        refreshStatus();
+        refreshModels();
       });
     });
   }
@@ -185,7 +326,7 @@
   // --- Gallery -----------------------------------------------------------
   async function refreshGallery() {
     const list = $("#gallery-list");
-    const data = await Api.listIndividuals().catch((err) => {
+    const data = await Api.listIndividuals(selectedModel).catch((err) => {
       toast(err.message, "error");
       return null;
     });
@@ -199,7 +340,8 @@
       list.appendChild(li);
       return;
     }
-    data.individuals.forEach((id) => {
+    // Latest-first: the gallery stores ids in enrollment order, so reverse it.
+    data.individuals.slice().reverse().forEach((id) => {
       const li = document.createElement("li");
       const name = document.createElement("span");
       name.textContent = id;
@@ -208,10 +350,10 @@
       del.textContent = "Delete";
       del.addEventListener("click", () =>
         withBusy(del, async () => {
-          await Api.deleteIndividual(id);
+          await Api.deleteIndividual(id, selectedModel);
           toast(`Removed '${id}'`);
           await refreshGallery();
-          refreshStatus();
+          refreshModels();
         })
       );
       li.appendChild(name);
@@ -223,24 +365,115 @@
   function initGalleryActions() {
     $("#refresh-btn").addEventListener("click", (e) => withBusy(e.target, refreshGallery));
 
-    $("#seed-btn").addEventListener("click", (e) =>
-      withBusy(e.target, async () => {
-        const res = await Api.seed();
-        if (!res) return;
-        toast(`Seeded ${res.individuals_enrolled} individuals from the dataset`);
-        await refreshGallery();
-        refreshStatus();
+    // Seeding embeds every reference image, so it runs as a background job (SSE).
+    $("#seed-btn").addEventListener("click", () =>
+      runJob("Seed", () => Api.seed(selectedModel), () => {
+        refreshGallery();
+        refreshModels();
       })
     );
 
     $("#reset-btn").addEventListener("click", (e) => {
       if (!confirm("Remove ALL enrolled individuals?")) return;
       withBusy(e.target, async () => {
-        await Api.resetGallery();
+        await Api.resetGallery(selectedModel);
         toast("Gallery cleared");
         await refreshGallery();
-        refreshStatus();
+        refreshModels();
       });
+    });
+  }
+
+  // --- Settings: datasets + training -------------------------------------
+  /** Render the dataset catalogue (download/precompute) and populate the train select. */
+  async function refreshDatasets() {
+    const listEl = $("#dataset-list");
+    const trainSelect = $("#train-dataset");
+    const data = await Api.listDatasets().catch((err) => {
+      toast(err.message, "error");
+      return null;
+    });
+    if (!data) return;
+
+    listEl.innerHTML = "";
+    const downloaded = [];
+    data.datasets.forEach((d) => {
+      const li = document.createElement("li");
+      const name = document.createElement("span");
+      name.textContent = d.name;
+      const badge = document.createElement("span");
+      badge.className = "badge " + (d.downloaded ? "badge--ok" : "badge--muted");
+      badge.textContent = d.downloaded ? "downloaded" : "not downloaded";
+
+      const actions = document.createElement("span");
+      actions.className = "settings-actions";
+      const dl = document.createElement("button");
+      dl.className = "btn js-job-btn";
+      dl.textContent = "Download";
+      dl.disabled = jobRunning;
+      dl.addEventListener("click", () =>
+        runJob(`Download ${d.name}`, () => Api.downloadDataset(d.name), () => refreshDatasets())
+      );
+      const pc = document.createElement("button");
+      pc.className = "btn js-job-btn";
+      pc.textContent = "Precompute";
+      pc.disabled = jobRunning || !d.downloaded;
+      pc.addEventListener("click", () => runJob(`Precompute ${d.name}`, () => Api.precomputeDataset(d.name), null));
+      actions.append(dl, pc);
+
+      li.append(name, badge, actions);
+      listEl.appendChild(li);
+      if (d.downloaded) downloaded.push(d.name);
+    });
+
+    trainSelect.innerHTML = "";
+    if (downloaded.length === 0) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "(download a dataset first)";
+      trainSelect.appendChild(opt);
+      trainSelect.disabled = true;
+    } else {
+      trainSelect.disabled = false;
+      downloaded.forEach((n) => {
+        const opt = document.createElement("option");
+        opt.value = n;
+        opt.textContent = n;
+        trainSelect.appendChild(opt);
+      });
+    }
+  }
+
+  function initTrainForm() {
+    $("#train-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const name = $("#train-model-name").value.trim();
+      const dataset = $("#train-dataset").value;
+      if (!name || !dataset) return;
+      runJob(`Train ${name}`, () => Api.train(name, dataset), () => {
+        $("#train-form").reset();
+        refreshModels(); // the new model now appears in the picker
+      });
+    });
+  }
+
+  // --- Frontend-only Reset buttons ---------------------------------------
+  function initResetButtons() {
+    $("#identify-reset").addEventListener("click", () => {
+      $("#identify-form").reset();
+      ["#identify-preview", "#identify-heatmap"].forEach((sel) => {
+        const img = $(sel);
+        img.removeAttribute("src");
+        img.classList.remove("has-image");
+      });
+      const verdict = $("#identify-verdict");
+      verdict.textContent = "";
+      verdict.className = "verdict";
+      $("#identify-candidates").innerHTML = "";
+    });
+    $("#enroll-reset").addEventListener("click", () => {
+      $("#enroll-form").reset();
+      $("#enroll-thumbs").innerHTML = "";
     });
   }
 
@@ -254,9 +487,14 @@
   // --- Bootstrap ---------------------------------------------------------
   document.addEventListener("DOMContentLoaded", () => {
     initTabs();
+    initModelPicker();
+    initJobIndicator();
     initIdentify();
     initEnroll();
     initGalleryActions();
-    refreshStatus();
+    initTrainForm();
+    initResetButtons();
+    refreshModels();
+    resumeActiveJob(); // re-attach the indicator if a job is already running
   });
 })();

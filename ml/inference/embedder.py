@@ -14,6 +14,7 @@ embedding — recomputing attention separately could drift from what was used.
 """
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Tuple
 
 import numpy as np
@@ -80,27 +81,72 @@ class Embedder:
         )
 
 
-def load_embedder(settings: Settings = None) -> Embedder:
+def _settings_from_checkpoint(checkpoint: dict, fallback: Settings) -> Settings:
     """
-    Reconstruct an ``Embedder`` from the saved training checkpoint.
+    Rebuild the training-time ``Settings`` from a checkpoint's saved snapshot.
 
-    Rebuilds the head against the checkpoint's stored ``feature_dim`` and loads
-    its weights, so the embedder is byte-identical to the trained model. Raises a
-    clear error if no checkpoint exists, since inference is meaningless without a
-    trained head.
+    A model's backbone and patch geometry are properties of *how it was trained*,
+    not of the current environment — so we reconstruct them from the snapshot
+    ``_save_checkpoint`` wrote. Without this, a model trained with, say, ``resnet50``
+    or ``NATIVE`` patches would be loaded with the live env's backbone/geometry and
+    produce garbage embeddings. Falls back to ``fallback`` for legacy checkpoints
+    that predate the snapshot.
     """
-    settings = settings if settings is not None else get_settings()
-    if not settings.head_weights_path.exists():
-        raise FileNotFoundError(
-            f"No trained head at {settings.head_weights_path}. Run training before inference."
-        )
+    snapshot = checkpoint.get("settings")
+    if not snapshot:
+        return fallback
+    try:
+        return Settings(**snapshot)
+    except Exception as error:
+        logger.warning(f"Could not rebuild settings from checkpoint snapshot ({error}); using live settings.")
+        return fallback
 
-    checkpoint = torch.load(settings.head_weights_path, map_location="cpu", weights_only=False)
+
+def _load_embedder_from_path(checkpoint_path: Path, fallback_settings: Settings) -> Embedder:
+    """
+    Build an ``Embedder`` from a specific checkpoint file.
+
+    The backbone + head are constructed from the checkpoint's own settings so the
+    embedder is byte-identical to the trained model regardless of the current
+    environment. Shared by the active-model and named-model entry points.
+    """
+    if not checkpoint_path.exists():
+        raise FileNotFoundError(f"No trained head at {checkpoint_path}. Run training before inference.")
+
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     feature_dim = checkpoint["feature_dim"]
+    model_settings = _settings_from_checkpoint(checkpoint=checkpoint, fallback=fallback_settings)
 
-    backbone = build_backbone(settings=settings)
-    head = MILEmbedder(settings=settings, feature_dim=feature_dim)
+    backbone = build_backbone(settings=model_settings)
+    head = MILEmbedder(settings=model_settings, feature_dim=feature_dim)
     head.load_state_dict(checkpoint["head_state_dict"])
 
-    logger.info(f"Loaded embedder from {settings.head_weights_path} (feature_dim={feature_dim}).")
-    return Embedder(backbone=backbone, head=head, settings=settings)
+    logger.info(
+        f"Loaded embedder from {checkpoint_path} "
+        f"(backbone={model_settings.backbone.value}, feature_dim={feature_dim})."
+    )
+    return Embedder(backbone=backbone, head=head, settings=model_settings)
+
+
+def load_embedder(settings: Settings = None) -> Embedder:
+    """
+    Reconstruct the *active* model's ``Embedder`` (``settings.model_name``).
+
+    Loads from the active model's checkpoint path and rebuilds it from the
+    checkpoint's saved settings. Raises ``FileNotFoundError`` when untrained, since
+    inference is meaningless without a head.
+    """
+    settings = settings if settings is not None else get_settings()
+    return _load_embedder_from_path(checkpoint_path=settings.head_weights_path, fallback_settings=settings)
+
+
+def load_embedder_for(checkpoint_path: Path, settings: Settings = None) -> Embedder:
+    """
+    Reconstruct an ``Embedder`` from an explicit checkpoint path (a named model).
+
+    Used by the multi-model registry/service, which resolves each model's
+    checkpoint path itself. The embedder's geometry comes from the checkpoint, so
+    ``settings`` is only a fallback for legacy snapshot-less checkpoints.
+    """
+    settings = settings if settings is not None else get_settings()
+    return _load_embedder_from_path(checkpoint_path=checkpoint_path, fallback_settings=settings)

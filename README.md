@@ -80,6 +80,24 @@ curl -F "file=@query.jpg" localhost:8000/identify
 curl -F "file=@query.jpg" localhost:8000/explain --output heatmap.png
 ```
 
+### Settings view (UI) — datasets, training, background jobs
+The **Settings** tab drives the slow operations from the browser instead of the CLI:
+- **Datasets**: download a curated dataset (downloaded badge per row), then
+  **Precompute** its feature cache.
+- **Train a model**: pick a downloaded dataset + a model name → train; the new model
+  appears in the model picker when done.
+
+These run as **background jobs**: the API returns `202 Accepted` with a `job_id`, and
+the browser streams progress over **SSE** (`GET /jobs/{id}/events`). Only **one job
+runs at a time** — a second start is rejected (`409`), and a header indicator shows
+the running job with a **Cancel** button (cooperative; a download already in flight
+can't be interrupted). Gallery **Seed** is a background job too.
+
+Job endpoints: `GET /datasets`, `POST /datasets/{name}/{download,precompute}`,
+`POST /train`, `POST /gallery/seed`, `GET /jobs/active`, `GET /jobs/{id}`,
+`POST /jobs/{id}/cancel`, `GET /jobs/{id}/events` (SSE). Single uvicorn worker —
+the job registry is in-memory and per-process.
+
 ### Native (Intel macOS)
 The container is the supported path. For a native Intel-mac install, use the
 mac-specific pins (torch comes from the PyTorch CPU index, not PyPI):
@@ -117,6 +135,26 @@ docker compose run --rm reid -e REID_PATCH_RESOLUTION=NATIVE python -m scripts.p
 ```
 Re-run `precompute_features` after changing this — the cached embeddings differ
 between modes.
+
+## Multiple models / species
+A single running app can serve several trained models (one per species/domain). A
+model only re-identifies the domain it was trained on, so to cover more species you
+train more models. Each is namespaced by `REID_MODEL_NAME` under
+`artifacts/models/<name>/` (its own checkpoint **and** gallery):
+```bash
+# Each model needs its dataset downloaded + features cached, then trained:
+REID_DATASET=SeaTurtleIDHeads docker compose run --rm reid python -m scripts.download_data
+REID_DATASET=SeaTurtleIDHeads docker compose run --rm reid python -m scripts.precompute_features
+REID_MODEL_NAME=turtles REID_DATASET=SeaTurtleIDHeads docker compose run --rm reid python -m scripts.train
+
+REID_DATASET=IPanda50 docker compose run --rm reid python -m scripts.download_data
+REID_DATASET=IPanda50 docker compose run --rm reid python -m scripts.precompute_features
+REID_MODEL_NAME=pandas REID_DATASET=IPanda50 docker compose run --rm reid python -m scripts.train
+```
+Then `docker compose up api`: `GET /models` lists both, the UI shows a **model
+picker**, and every API call takes an optional `model` field (defaults to
+`REID_MODEL_NAME`). Each model has an **isolated gallery** — enrolling/seeding under
+`turtles` never affects `pandas`. Models load lazily on first use and stay resident.
 
 ## Ablation (quantifying what attention buys)
 Train and evaluate with mean pooling to get the baseline the paper compares
