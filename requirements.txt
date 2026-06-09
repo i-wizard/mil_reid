@@ -1,0 +1,39 @@
+# =============================================================================
+# Linux / CPU container dependencies (the portable, reproducible path).
+#
+# This file is consumed by the Dockerfile. Unlike requirements-mac.txt it carries
+# NO Intel-mac caps: on Linux we use modern torch (NumPy-2 capable), NumPy 2, and
+# current opencv. Versions are exact-pinned for byte-identical reviewer builds.
+#
+# CPU torch wheels come from the PyTorch CPU index below; the `+cpu` local version
+# exists only there, so resolution is deterministic and never pulls the CUDA build.
+# =============================================================================
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# --- Core deep-learning stack (CPU wheels) ---
+torch==2.5.1+cpu
+torchvision==0.20.1+cpu
+timm==1.0.27
+
+# --- Wildlife dataset access (download + standardized metadata dataframe) ---
+# We deliberately do NOT use `wildlife-tools` (it hard-requires faiss-gpu);
+# similarity/retrieval/metrics are implemented natively in ml/inference + ml/eval.
+wildlife-datasets==1.0.8
+huggingface_hub==0.26.5
+opencv-python==4.10.0.84
+
+# --- Data / numerics / config ---
+numpy==2.1.3
+pandas==2.2.3
+pydantic==2.9.2
+pydantic-settings==2.6.1
+pillow==11.0.0
+
+# --- Metrics + visualisation ---
+scikit-learn==1.5.2
+matplotlib==3.9.2
+
+# --- HTTP API (Part 2) + static UI serving (Part 3) ---
+fastapi==0.115.5
+uvicorn[standard]==0.32.1      # [standard] pulls watchfiles for --reload, used in docker-compose
+python-multipart==0.0.12       # required for UploadFile / Form (image uploads)

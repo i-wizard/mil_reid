@@ -1,0 +1,22 @@
+# Datasets and generated artifacts are large and reproducible — never commit them.
+data/
+artifacts/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Local environment overrides (sample.env IS committed; .env is not)
+.env
+
+# OS / editor
+.DS_Store
+**/*.DS_Store
+
+#Pycharm
+.idea/
+.claude/

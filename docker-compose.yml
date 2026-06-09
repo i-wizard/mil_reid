@@ -1,0 +1,61 @@
+# Orchestration for the ML core review container.
+#
+# Usage:
+#   docker compose build                                   # build the image
+#   docker compose up                                      # run the smoke test (default CMD)
+#   docker compose run --rm reid python -m scripts.download_data
+#   docker compose run --rm reid python -m scripts.precompute_features
+#   docker compose run --rm reid python -m scripts.train
+#   docker compose run --rm reid python -m scripts.evaluate
+#   docker compose run --rm reid python -m scripts.demo_identify
+#
+#   docker compose up api                                  # start the API + web UI on :8000
+#                                                          # then open http://localhost:8000/
+services:
+  reid:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: reid-ml:latest
+    # Pin the platform so the +cpu torch wheels resolve on Apple-Silicon hosts too.
+    platform: linux/amd64
+    # Load REID_* overrides from a local .env if present (copy from sample.env).
+    # required: false so `docker compose up` still works when no .env exists.
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      # --- Live code mounts: edits on the host take effect with NO rebuild. ---
+      # We overlay only the source dirs so the image's installed site-packages
+      # and the host .venv are never shadowed.
+      - ./ml:/app/ml
+      - ./scripts:/app/scripts
+      - ./tests:/app/tests
+      - ./api:/app/api
+      - ./web:/app/web
+      # --- Persistence: keep big/stateful data out of the image and across runs.
+      - ./data:/app/data                # downloaded datasets
+      - ./artifacts:/app/artifacts      # feature cache, trained weights, HF model cache, reports
+
+  # FastAPI HTTP API (Part 2) + same-origin web UI (Part 3). Reuses the image the
+  # `reid` service builds, so build once and run either. Hot-reloads on code edits
+  # via the bind mounts + uvicorn --reload (Python) / browser refresh (web/).
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: reid-ml:latest         # same tag as `reid`: the image is built once, shared by both
+    platform: linux/amd64
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./ml:/app/ml
+      - ./scripts:/app/scripts
+      - ./api:/app/api
+      - ./web:/app/web
+      - ./data:/app/data
+      - ./artifacts:/app/artifacts    # the API reads the trained head + persists the gallery here

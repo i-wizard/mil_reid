@@ -1,0 +1,4 @@
+## Project #1: Animal re-identification using MIL
+
+Animal re-identification is still a challenging issue due to the expense of tagging devices and the difficulties of attaching physical markers to animals permanently. These difficulties make photo identification a suitable solution, whether machine learning or human evaluation is used.
+Since they can evaluate a huge number of photos automatically and since recent advancements have reduced the requirement for large training datasets, accurate machine learning approaches offer an upgrade over manual identification. This project aims to develop an AI-based animal re-identification system that accurately identifies individual animals. In this project, animal re-identification is more concerned with identifying specific members of a species than with identifying the species of an animal

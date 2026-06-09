@@ -1,0 +1,25 @@
+# Keep the build context small and prevent host-local state from leaking into
+# the image. data/ and artifacts/ arrive via compose bind mounts, not the build.
+data/
+artifacts/
+
+# Local virtualenvs / interpreters
+.venv/
+venv/
+
+# VCS and IDE
+.git/
+.gitignore
+.idea/
+.vscode/
+
+# Python caches
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/
+
+# OS cruft and docs not needed at build time
+.DS_Store
+*.md
+plans/

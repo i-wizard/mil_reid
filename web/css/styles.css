@@ -1,0 +1,170 @@
+/*
+  Hand-written stylesheet for the re-identification demo UI.
+
+  No framework / no build step — one small file. Uses CSS custom properties for a
+  single source of palette truth and a simple responsive grid for the result
+  cards. Kept deliberately plain so a reviewer can read it top to bottom.
+*/
+
+:root {
+  --bg: #0f1419;
+  --surface: #1b232d;
+  --surface-2: #243040;
+  --text: #e8edf2;
+  --muted: #9aa7b4;
+  --accent: #3da9fc;
+  --good: #2ecc71;
+  --bad: #e74c3c;
+  --warn: #f1c40f;
+  --radius: 10px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.app-header { padding: 1.5rem 1.5rem 0.5rem; text-align: center; }
+.app-header h1 { margin: 0; font-size: 1.6rem; }
+.subtitle { margin: 0.25rem 0 0.75rem; color: var(--muted); font-size: 0.9rem; }
+
+/* --- Status banner --- */
+.banner {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0.6rem 1rem;
+  border-radius: var(--radius);
+  font-weight: 600;
+  text-align: center;
+}
+.banner--pending { background: var(--surface-2); color: var(--muted); }
+.banner--ready { background: rgba(46, 204, 113, 0.15); color: var(--good); border: 1px solid var(--good); }
+.banner--notready { background: rgba(231, 76, 60, 0.15); color: var(--bad); border: 1px solid var(--bad); }
+
+/* --- Tabs --- */
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  justify-content: center;
+  margin: 1.25rem auto 0;
+  max-width: 720px;
+  border-bottom: 1px solid var(--surface-2);
+}
+.tab {
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 0.6rem 1.1rem;
+  font-size: 1rem;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.tab.is-active { color: var(--text); border-bottom-color: var(--accent); }
+
+/* --- Panels --- */
+main { max-width: 720px; margin: 0 auto; padding: 1.25rem 1.5rem 4rem; }
+.panel { display: none; }
+.panel.is-active { display: block; }
+.panel h2 { margin-top: 0; }
+.hint { color: var(--muted); font-size: 0.9rem; margin-top: -0.4rem; }
+
+/* --- Forms --- */
+.form { display: flex; flex-direction: column; gap: 0.75rem; margin: 1rem 0; }
+.text-input {
+  padding: 0.6rem 0.8rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--surface-2);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 1rem;
+}
+.file-drop {
+  display: block;
+  padding: 1.2rem;
+  border: 1px dashed var(--surface-2);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--muted);
+  text-align: center;
+  cursor: pointer;
+}
+.file-drop input { display: none; }
+
+/* --- Buttons --- */
+.btn {
+  padding: 0.6rem 1.1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--surface-2);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) { filter: brightness(1.15); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn--primary { background: var(--accent); border-color: var(--accent); color: #05131f; font-weight: 600; }
+.btn--danger { background: transparent; border-color: var(--bad); color: var(--bad); }
+.btn.is-busy { position: relative; color: transparent; }
+.btn.is-busy::after {
+  content: ""; position: absolute; inset: 0; margin: auto;
+  width: 1rem; height: 1rem; border: 2px solid currentColor; border-top-color: transparent;
+  border-radius: 50%; animation: spin 0.7s linear infinite; color: #05131f;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* --- Results --- */
+.results--identify {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.image-card { margin: 0; background: var(--surface); border-radius: var(--radius); padding: 0.5rem; }
+.image-card figcaption { font-size: 0.8rem; color: var(--muted); margin-bottom: 0.4rem; }
+.preview { width: 100%; border-radius: 6px; display: none; background: var(--surface-2); aspect-ratio: 1; object-fit: contain; }
+.preview.has-image { display: block; }
+
+.verdict { grid-column: 1 / -1; font-size: 1.1rem; font-weight: 700; min-height: 1.5rem; }
+.verdict--known { color: var(--good); }
+.verdict--unknown { color: var(--warn); }
+
+.candidates { grid-column: 1 / -1; list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+.candidate { background: var(--surface); border-radius: var(--radius); padding: 0.5rem 0.75rem; }
+.candidate__row { display: flex; justify-content: space-between; font-size: 0.9rem; }
+.candidate__bar { height: 6px; background: var(--surface-2); border-radius: 3px; margin-top: 0.35rem; overflow: hidden; }
+.candidate__fill { height: 100%; background: var(--accent); }
+.candidate.is-top .candidate__fill { background: var(--good); }
+
+/* --- Thumbnails (enroll) --- */
+.thumbs { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.thumbs img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; }
+
+/* --- Gallery --- */
+.gallery-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 1rem 0; }
+.gallery-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+.gallery-list li {
+  display: flex; justify-content: space-between; align-items: center;
+  background: var(--surface); border-radius: var(--radius); padding: 0.5rem 0.75rem;
+}
+.gallery-list .empty { justify-content: center; color: var(--muted); }
+
+/* --- Toast --- */
+.toast {
+  position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%) translateY(2rem);
+  background: var(--surface-2); color: var(--text);
+  padding: 0.7rem 1.1rem; border-radius: var(--radius);
+  opacity: 0; pointer-events: none; transition: opacity 0.25s, transform 0.25s;
+  max-width: 90vw; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast--error { border: 1px solid var(--bad); }
+.toast--success { border: 1px solid var(--good); }
+
+@media (max-width: 560px) {
+  .results--identify { grid-template-columns: 1fr; }
+}
