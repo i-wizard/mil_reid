@@ -13,7 +13,7 @@ from api.dependencies import get_jobs
 from api.jobs import Job, JobEvent, JobKind, JobManager, JobStatus
 from api.schemas import JobAccepted, TrainRequest
 from ml.config import get_settings
-from ml.data.dataset import CURATED_DATASETS, is_downloaded
+from ml.data.dataset import CURATED_DATASETS, is_downloaded, is_precomputed
 from ml.training.train import run_training
 
 router = APIRouter(tags=["training"])
@@ -44,6 +44,14 @@ def train(request: TrainRequest, jobs: JobManager = Depends(get_jobs)) -> JobAcc
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Dataset '{request.dataset}' is not downloaded — download + precompute it first.",
+        )
+    # Training reads the feature cache, so it must be precomputed under the current
+    # settings. Fail fast here instead of letting the job build the backbone and then
+    # crash on the first batch with a per-image FileNotFoundError.
+    if not is_precomputed(name=request.dataset, settings=probe):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Dataset '{request.dataset}' has no feature cache for the current settings — precompute it first.",
         )
 
     def body(job: Job) -> dict:

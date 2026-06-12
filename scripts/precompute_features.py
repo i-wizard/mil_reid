@@ -11,7 +11,7 @@ Usage:
 """
 
 from ml.config import get_settings
-from ml.data.dataset import load_dataset
+from ml.data.dataset import load_dataset, mark_precomputed
 from ml.features.cache import precompute_features
 from ml.utils.logging import get_logger
 
@@ -23,6 +23,9 @@ def main() -> None:
     settings = get_settings()
     bundle = load_dataset(settings=settings)
     written = precompute_features(df=bundle.df, settings=settings)
+    # Record completion so the API/UI and the train guard recognise this dataset as
+    # precomputed (under the current cache signature), matching the job path.
+    mark_precomputed(name=settings.dataset, settings=settings, count=bundle.num_images)
     logger.info(f"Done. {written} new cache files written under {settings.cache_root}.")
 
 

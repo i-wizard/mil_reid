@@ -195,6 +195,7 @@ main { max-width: 720px; margin: 0 auto; padding: 1.25rem 1.5rem 4rem; }
   background: var(--surface); border-radius: var(--radius); padding: 0.5rem 0.75rem;
 }
 .settings-list li > span:first-child { flex: 1 1 auto; }
+.settings-badges { display: flex; gap: 0.4rem; }
 .settings-actions { display: flex; gap: 0.4rem; }
 .badge { font-size: 0.75rem; padding: 0.15rem 0.5rem; border-radius: 999px; }
 .badge--ok { background: rgba(46, 204, 113, 0.15); color: var(--good); border: 1px solid var(--good); }

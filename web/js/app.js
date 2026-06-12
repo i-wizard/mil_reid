@@ -396,14 +396,24 @@
     if (!data) return;
 
     listEl.innerHTML = "";
-    const downloaded = [];
+    const trainable = []; // downloaded AND precomputed → eligible to train
     data.datasets.forEach((d) => {
       const li = document.createElement("li");
       const name = document.createElement("span");
       name.textContent = d.name;
-      const badge = document.createElement("span");
-      badge.className = "badge " + (d.downloaded ? "badge--ok" : "badge--muted");
-      badge.textContent = d.downloaded ? "downloaded" : "not downloaded";
+
+      const badges = document.createElement("span");
+      badges.className = "settings-badges";
+      const dlBadge = document.createElement("span");
+      dlBadge.className = "badge " + (d.downloaded ? "badge--ok" : "badge--muted");
+      dlBadge.textContent = d.downloaded ? "downloaded" : "not downloaded";
+      badges.appendChild(dlBadge);
+      if (d.downloaded) {
+        const pcBadge = document.createElement("span");
+        pcBadge.className = "badge " + (d.precomputed ? "badge--ok" : "badge--muted");
+        pcBadge.textContent = d.precomputed ? "precomputed" : "not precomputed";
+        badges.appendChild(pcBadge);
+      }
 
       const actions = document.createElement("span");
       actions.className = "settings-actions";
@@ -418,24 +428,26 @@
       pc.className = "btn js-job-btn";
       pc.textContent = "Precompute";
       pc.disabled = jobRunning || !d.downloaded;
-      pc.addEventListener("click", () => runJob(`Precompute ${d.name}`, () => Api.precomputeDataset(d.name), null));
+      // Refresh the list on success so the 'precomputed' badge flips on.
+      pc.addEventListener("click", () => runJob(`Precompute ${d.name}`, () => Api.precomputeDataset(d.name), () => refreshDatasets()));
       actions.append(dl, pc);
 
-      li.append(name, badge, actions);
+      li.append(name, badges, actions);
       listEl.appendChild(li);
-      if (d.downloaded) downloaded.push(d.name);
+      if (d.downloaded && d.precomputed) trainable.push(d.name);
     });
 
+    // Only precomputed datasets can be trained (the server enforces this too).
     trainSelect.innerHTML = "";
-    if (downloaded.length === 0) {
+    if (trainable.length === 0) {
       const opt = document.createElement("option");
       opt.value = "";
-      opt.textContent = "(download a dataset first)";
+      opt.textContent = "(precompute a dataset first)";
       trainSelect.appendChild(opt);
       trainSelect.disabled = true;
     } else {
       trainSelect.disabled = false;
-      downloaded.forEach((n) => {
+      trainable.forEach((n) => {
         const opt = document.createElement("option");
         opt.value = n;
         opt.textContent = n;

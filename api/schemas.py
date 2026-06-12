@@ -94,10 +94,11 @@ class MessageResponse(BaseModel):
 
 
 class DatasetInfo(BaseModel):
-    """One curated dataset and whether it's already on disk (for the download list)."""
+    """One curated dataset with its local status (for the Settings list)."""
 
     name: str = Field(description="WildlifeDatasets class name.")
     downloaded: bool = Field(description="True when the dataset's files are present locally.")
+    precomputed: bool = Field(description="True when its feature cache is built for the current settings (trainable).")
 
 
 class DatasetsResponse(BaseModel):

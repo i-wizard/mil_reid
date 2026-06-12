@@ -194,6 +194,9 @@ def _save_checkpoint(
     which has no role at inference. Saving the geometry alongside the weights
     means inference never has to guess how the checkpoint was shaped.
     """
+    # Each model is namespaced under artifacts/models/<model_name>/, which may not
+    # exist yet on a first train — create it before saving.
+    settings.head_weights_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
             "head_state_dict": embedder.state_dict(),

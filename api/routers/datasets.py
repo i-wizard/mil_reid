@@ -13,7 +13,14 @@ from api.dependencies import get_jobs
 from api.jobs import Job, JobEvent, JobKind, JobManager, JobStatus
 from api.schemas import DatasetInfo, DatasetsResponse, JobAccepted
 from ml.config import get_settings
-from ml.data.dataset import CURATED_DATASETS, catalog, download_dataset, is_downloaded, load_dataset
+from ml.data.dataset import (
+    CURATED_DATASETS,
+    catalog,
+    download_dataset,
+    is_downloaded,
+    load_dataset,
+    mark_precomputed,
+)
 from ml.features.cache import precompute_features
 
 router = APIRouter(tags=["datasets"])
@@ -102,6 +109,9 @@ def precompute(name: str, jobs: JobManager = Depends(get_jobs)) -> JobAccepted:
             )
 
         written = precompute_features(df=bundle.df, settings=job_settings, progress_callback=on_progress)
+        # Mark complete only after the full pass (cancellation raises before here),
+        # so the UI/train guard can tell the dataset is ready under these settings.
+        mark_precomputed(name=name, settings=job_settings, count=bundle.num_images)
         return {"dataset": name, "images": bundle.num_images, "newly_cached": written}
 
     job = jobs.start(kind=JobKind.PRECOMPUTE, params={"dataset": name}, body=body)

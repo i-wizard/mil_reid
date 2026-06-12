@@ -359,8 +359,8 @@ DATASETS_URL = "/datasets"
 TRAIN_URL = "/train"
 
 
-def test_datasets_lists_curated_with_downloaded_flag() -> None:
-    """/datasets returns the curated catalogue, each with a boolean downloaded flag."""
+def test_datasets_lists_curated_with_status_flags() -> None:
+    """/datasets returns the curated catalogue, each with downloaded + precomputed bools."""
     from ml.data.dataset import CURATED_DATASETS
 
     client = _client(_two_model_service())
@@ -368,6 +368,24 @@ def test_datasets_lists_curated_with_downloaded_flag() -> None:
     names = [d["name"] for d in body["datasets"]]
     assert names == CURATED_DATASETS
     assert all(isinstance(d["downloaded"], bool) for d in body["datasets"])
+    assert all(isinstance(d["precomputed"], bool) for d in body["datasets"])
+
+
+def test_precompute_marker_signature() -> None:
+    """A marker counts as precomputed only while the cache signature matches."""
+    import tempfile
+
+    from ml.config import get_settings
+    from ml.data.dataset import is_precomputed, mark_precomputed
+
+    with tempfile.TemporaryDirectory() as tmp:
+        settings = get_settings({"cache_root": tmp})
+        assert is_precomputed("DemoSet", settings) is False
+        mark_precomputed("DemoSet", settings, count=5)
+        assert is_precomputed("DemoSet", settings) is True
+        # Changing patch geometry invalidates the marker (stale cache).
+        changed = get_settings({"cache_root": tmp, "patch_grid": settings.patch_grid + 1})
+        assert is_precomputed("DemoSet", changed) is False
 
 
 def test_download_starts_job_and_rejects_unknown_dataset() -> None:
@@ -387,21 +405,25 @@ def test_single_flight_rejects_second_job_with_409() -> None:
 
 
 def test_train_validates_dataset() -> None:
-    """/train: 404 for a non-curated dataset, 422 for one that isn't downloaded."""
+    """/train gates on curated → downloaded → precomputed before starting a job."""
     import api.routers.training as training_router
 
     client = _client(_two_model_service())
-    # Non-curated → 404 (checked before any download probe).
-    r404 = client.post(TRAIN_URL, json={"model_name": "m", "dataset": "NotReal"})
-    assert r404.status_code == 404
+    # Non-curated → 404 (checked before any download/precompute probe).
+    assert client.post(TRAIN_URL, json={"model_name": "m", "dataset": "NotReal"}).status_code == 404
 
     # Curated but not downloaded → 422.
     training_router.is_downloaded = lambda name, settings: False
-    r422 = client.post(TRAIN_URL, json={"model_name": "m", "dataset": "SeaTurtleIDHeads"})
-    assert r422.status_code == 422
+    training_router.is_precomputed = lambda name, settings: False
+    assert client.post(TRAIN_URL, json={"model_name": "m", "dataset": "SeaTurtleIDHeads"}).status_code == 422
 
-    # Curated + downloaded → 202 job.
+    # Downloaded but NOT precomputed → 422 (the new guard).
     training_router.is_downloaded = lambda name, settings: True
+    training_router.is_precomputed = lambda name, settings: False
+    assert client.post(TRAIN_URL, json={"model_name": "m", "dataset": "SeaTurtleIDHeads"}).status_code == 422
+
+    # Downloaded + precomputed → 202 job.
+    training_router.is_precomputed = lambda name, settings: True
     r202 = client.post(TRAIN_URL, json={"model_name": "m", "dataset": "SeaTurtleIDHeads"})
     assert r202.status_code == 202 and r202.json()["kind"] == "train"
 
