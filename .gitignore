@@ -1,6 +1,8 @@
 # Datasets and generated artifacts are large and reproducible — never commit them.
-data/
-artifacts/
+# Leading slash anchors these to the repo root so they DON'T also match the
+# source package ml/data/ (which must be committed).
+/data/
+/artifacts/
 
 # Python
 __pycache__/
